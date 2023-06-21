@@ -325,7 +325,9 @@ def get_dependant(
             ), f"Cannot specify multiple FastAPI annotations for {param_name!r}"
             continue
         assert param_field is not None
-        if is_body_param(param_field=param_field, is_path_param=is_path_param):
+        if isinstance(param_field.field_info, params.Query):
+            dependant.query_params.append(param_field)
+        elif is_body_param(param_field=param_field, is_path_param=is_path_param):
             dependant.body_params.append(param_field)
         else:
             add_param_to_fields(field=param_field, dependant=dependant)
