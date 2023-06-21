@@ -9,6 +9,7 @@ from typing import (
     Optional,
     Sequence,
     Type,
+    TypeVar,
     Union,
 )
 
@@ -18,8 +19,9 @@ from fastapi.encoders import DictIntStrAny, SetIntStr
 from fastapi.exception_handlers import (
     http_exception_handler,
     request_validation_exception_handler,
+    websocket_request_validation_exception_handler,
 )
-from fastapi.exceptions import RequestValidationError
+from fastapi.exceptions import RequestValidationError, WebSocketRequestValidationError
 from fastapi.logger import logger
 from fastapi.middleware.asyncexitstack import AsyncExitStackMiddleware
 from fastapi.openapi.docs import (
@@ -41,12 +43,14 @@ from starlette.middleware.exceptions import ExceptionMiddleware
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import BaseRoute
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Lifespan, Receive, Scope, Send
+
+AppType = TypeVar("AppType", bound="FastAPI")
 
 
 class FastAPI(Starlette):
     def __init__(
-        self,
+        self: AppType,
         *,
         debug: bool = False,
         routes: Optional[List[BaseRoute]] = None,
@@ -71,6 +75,7 @@ class FastAPI(Starlette):
         ] = None,
         on_startup: Optional[Sequence[Callable[[], Any]]] = None,
         on_shutdown: Optional[Sequence[Callable[[], Any]]] = None,
+        lifespan: Optional[Lifespan[AppType]] = None,
         terms_of_service: Optional[str] = None,
         contact: Optional[Dict[str, Union[str, Any]]] = None,
         license_info: Optional[Dict[str, Union[str, Any]]] = None,
@@ -125,6 +130,7 @@ class FastAPI(Starlette):
             dependency_overrides_provider=self,
             on_startup=on_startup,
             on_shutdown=on_shutdown,
+            lifespan=lifespan,
             default_response_class=default_response_class,
             dependencies=dependencies,
             callbacks=callbacks,
@@ -139,6 +145,11 @@ class FastAPI(Starlette):
         self.exception_handlers.setdefault(HTTPException, http_exception_handler)
         self.exception_handlers.setdefault(
             RequestValidationError, request_validation_exception_handler
+        )
+        self.exception_handlers.setdefault(
+            WebSocketRequestValidationError,
+            # Starlette still has incorrect type specification for the handlers
+            websocket_request_validation_exception_handler,  # type: ignore
         )
 
         self.user_middleware: List[Middleware] = (
@@ -390,15 +401,34 @@ class FastAPI(Starlette):
         return decorator
 
     def add_api_websocket_route(
-        self, path: str, endpoint: Callable[..., Any], name: Optional[str] = None
+        self,
+        path: str,
+        endpoint: Callable[..., Any],
+        name: Optional[str] = None,
+        *,
+        dependencies: Optional[Sequence[Depends]] = None,
     ) -> None:
-        self.router.add_api_websocket_route(path, endpoint, name=name)
+        self.router.add_api_websocket_route(
+            path,
+            endpoint,
+            name=name,
+            dependencies=dependencies,
+        )
 
     def websocket(
-        self, path: str, name: Optional[str] = None
+        self,
+        path: str,
+        name: Optional[str] = None,
+        *,
+        dependencies: Optional[Sequence[Depends]] = None,
     ) -> Callable[[DecoratedCallable], DecoratedCallable]:
         def decorator(func: DecoratedCallable) -> DecoratedCallable:
-            self.add_api_websocket_route(path, func, name=name)
+            self.add_api_websocket_route(
+                path,
+                func,
+                name=name,
+                dependencies=dependencies,
+            )
             return func
 
         return decorator
